@@ -348,8 +348,10 @@ export default function App() {
   var _zoom      = _s(1),      zoom=_zoom[0],       setZoom=_zoom[1];
   var _tab       = _s("buildings"), tab=_tab[0],     setTab=_tab[1];
   var _ghost     = _s(null),   ghost=_ghost[0],     setGhost=_ghost[1];
+  var _mob       = _s(false),  isMobile=_mob[0],    setIsMobile=_mob[1];
+  var _panel     = _s(false),  panelOpen=_panel[0], setPanelOpen=_panel[1];
 
-  var idRef=_r(1), cvRef=_r(null), dragRef=_r(null), panRef=_r(null);
+  var idRef=_r(1), cvRef=_r(null), dragRef=_r(null), panRef=_r(null), touchRef=_r(null);
 
   var scores = _m(function(){ return calcScores(nodes); }, [nodes]);
   var total = _m(function(){ var s=0; for(var k in scores) s+=scores[k].score; return s; }, [scores]);
@@ -376,6 +378,67 @@ export default function App() {
     }
     window.addEventListener("keydown",h); return function(){window.removeEventListener("keydown",h);};
   },[selId]);
+
+  // Mobile detection
+  _e(function(){
+    function check(){setIsMobile(window.innerWidth < 768);}
+    check();
+    window.addEventListener("resize",check);
+    return function(){window.removeEventListener("resize",check);};
+  },[]);
+
+  // Touch handlers for mobile pan/drag/pinch
+  _e(function(){
+    var el=cvRef.current; if(!el) return;
+    function onTS(e){
+      if(e.touches.length===1){
+        var t=e.touches[0];
+        // Check if touching a node
+        var target=document.elementFromPoint(t.clientX,t.clientY);
+        var nodeEl=target?target.closest("[data-nodeid]"):null;
+        if(nodeEl){
+          var nid=parseInt(nodeEl.getAttribute("data-nodeid"));
+          setSelId(nid);
+          var nd=null;
+          for(var i=0;i<nodes.length;i++){if(nodes[i].id===nid){nd=nodes[i];break;}}
+          if(nd) dragRef.current={id:nid,ox:t.clientX/zoom-pan.x-nd.x,oy:t.clientY/zoom-pan.y-nd.y};
+        } else {
+          setSelId(null);
+          if(isMobile&&panelOpen) setPanelOpen(false);
+          panRef.current={sx:t.clientX,sy:t.clientY,px:pan.x,py:pan.y};
+        }
+      } else if(e.touches.length===2){
+        // Pinch zoom start
+        var dx=e.touches[0].clientX-e.touches[1].clientX;
+        var dy=e.touches[0].clientY-e.touches[1].clientY;
+        touchRef.current={dist:Math.sqrt(dx*dx+dy*dy),zoom:zoom};
+      }
+    }
+    function onTM(e){
+      e.preventDefault();
+      if(e.touches.length===1){
+        var t=e.touches[0];
+        if(dragRef.current){
+          var info=dragRef.current;
+          setNodes(function(p){return p.map(function(n){return n.id===info.id?Object.assign({},n,{x:t.clientX/zoom-pan.x-info.ox,y:t.clientY/zoom-pan.y-info.oy}):n;});});
+        } else if(panRef.current){
+          setPan({x:panRef.current.px+(t.clientX-panRef.current.sx)/zoom,y:panRef.current.py+(t.clientY-panRef.current.sy)/zoom});
+        }
+      } else if(e.touches.length===2&&touchRef.current){
+        var dx=e.touches[0].clientX-e.touches[1].clientX;
+        var dy=e.touches[0].clientY-e.touches[1].clientY;
+        var newDist=Math.sqrt(dx*dx+dy*dy);
+        var scale=newDist/touchRef.current.dist;
+        var nz=Math.max(.15,Math.min(3,touchRef.current.zoom*scale));
+        setZoom(nz);
+      }
+    }
+    function onTE(){dragRef.current=null;panRef.current=null;touchRef.current=null;}
+    el.addEventListener("touchstart",onTS,{passive:false});
+    el.addEventListener("touchmove",onTM,{passive:false});
+    el.addEventListener("touchend",onTE);
+    return function(){el.removeEventListener("touchstart",onTS);el.removeEventListener("touchmove",onTM);el.removeEventListener("touchend",onTE);};
+  },[nodes,zoom,pan]);
 
   // Zoom centered on buildings centroid
   function zoomCentered(factor) {
@@ -423,6 +486,7 @@ export default function App() {
   function onCvDown(e) {
     if(e.target.closest("[data-nodeid]")) return;
     setSelId(null);
+    if(isMobile&&panelOpen) setPanelOpen(false);
     panRef.current={sx:e.clientX,sy:e.clientY,px:pan.x,py:pan.y};
   }
   function onMove(e) {
@@ -458,37 +522,38 @@ export default function App() {
   var buildingEntries = Object.entries(BD).filter(function(e){return(!filter||e[1].c===filter)&&(!e[1].ns||showNS);});
 
   return (
-    <div style={{display:"flex",height:"100vh",width:"100vw",overflow:"hidden",fontFamily:FN,background:"#080E1A",color:"#C8D6E5",userSelect:"none"}} onMouseMove={onMove} onMouseUp={onUp}>
+    <div style={{display:"flex",flexDirection:isMobile?"column":"row",height:"100vh",width:"100vw",overflow:"hidden",fontFamily:FN,background:"#080E1A",color:"#C8D6E5",userSelect:"none",touchAction:"none"}} onMouseMove={onMove} onMouseUp={onUp}>
       <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 
-      {/* SIDEBAR */}
-      <div style={{width:236,background:"#0C1222",borderRight:"1px solid #1A2236",display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
+      {/* SIDEBAR - full height on desktop, collapsible bottom panel on mobile */}
+      {(!isMobile || panelOpen) && <div style={isMobile?{position:"absolute",bottom:0,left:0,right:0,height:"60vh",background:"#0C1222",borderTop:"2px solid #E59500",zIndex:30,display:"flex",flexDirection:"column",borderRadius:"16px 16px 0 0",boxShadow:"0 -4px 24px rgba(0,0,0,.5)"}:{width:236,background:"#0C1222",borderRight:"1px solid #1A2236",display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
+        {isMobile&&<div onClick={function(){setPanelOpen(false);}} style={{display:"flex",justifyContent:"center",padding:"10px 0 6px",cursor:"pointer"}}><div style={{width:48,height:5,borderRadius:3,background:"#4A5568"}}/></div>}
         <div style={{display:"flex",borderBottom:"1px solid #1A2236"}}>
-          {["buildings","packs","boons","tips"].map(function(t){return <button key={t} onClick={function(){setTab(t);}} style={{flex:1,padding:"12px 0",fontSize:11,letterSpacing:1.2,textTransform:"uppercase",background:tab===t?"#1A2236":"transparent",color:tab===t?"#F0F4F8":"#4A5568",border:"none",cursor:"pointer",fontFamily:FN,fontWeight:700,borderBottom:tab===t?"2px solid #E59500":"2px solid transparent"}}>{t}</button>;})}
+          {["buildings","packs","boons","tips"].map(function(t){return <button key={t} onClick={function(){setTab(t);}} style={{flex:1,padding:isMobile?"14px 0":"12px 0",fontSize:isMobile?13:11,letterSpacing:1.2,textTransform:"uppercase",background:tab===t?"#1A2236":"transparent",color:tab===t?"#F0F4F8":"#4A5568",border:"none",cursor:"pointer",fontFamily:FN,fontWeight:700,borderBottom:tab===t?"2px solid #E59500":"2px solid transparent"}}>{t}</button>;})}
         </div>
 
         {tab==="buildings"&&<div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,padding:"8px 6px 4px"}}>
-            <button onClick={function(){setFilter(null);}} style={{fontSize:10,padding:"4px 8px",borderRadius:4,border:"none",cursor:"pointer",background:!filter?"#2A3A52":"#141E30",color:!filter?"#F0F4F8":"#4A5568",fontFamily:FN,fontWeight:600}}>All</button>
-            {Object.entries(CATS).filter(function(e){return e[0]!=="newshores"||showNS;}).map(function(e){return <button key={e[0]} onClick={function(){setFilter(e[0]);}} style={{fontSize:10,padding:"4px 8px",borderRadius:4,border:"none",cursor:"pointer",background:filter===e[0]?e[1].color+"33":"#141E30",color:filter===e[0]?e[1].color:"#4A5568",fontFamily:FN,fontWeight:600}}>{e[1].label}</button>;})}
+          <div style={{display:"flex",flexWrap:"wrap",gap:isMobile?6:4,padding:isMobile?"10px 10px 6px":"8px 6px 4px"}}>
+            <button onClick={function(){setFilter(null);}} style={{fontSize:isMobile?13:10,padding:isMobile?"8px 14px":"4px 8px",borderRadius:isMobile?8:4,border:"none",cursor:"pointer",background:!filter?"#2A3A52":"#141E30",color:!filter?"#F0F4F8":"#4A5568",fontFamily:FN,fontWeight:600}}>All</button>
+            {Object.entries(CATS).filter(function(e){return e[0]!=="newshores"||showNS;}).map(function(e){return <button key={e[0]} onClick={function(){setFilter(e[0]);}} style={{fontSize:isMobile?13:10,padding:isMobile?"8px 14px":"4px 8px",borderRadius:isMobile?8:4,border:"none",cursor:"pointer",background:filter===e[0]?e[1].color+"33":"#141E30",color:filter===e[0]?e[1].color:"#4A5568",fontFamily:FN,fontWeight:600}}>{e[1].label}</button>;})}
           </div>
-          <div onClick={function(){setShowNS(!showNS);}} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",fontSize:10,color:showNS?"#F59E0B":"#4A5568",cursor:"pointer"}}>
-            <div style={{width:28,height:16,borderRadius:8,background:showNS?"#F59E0B":"#2A3545",position:"relative",transition:"background .2s",flexShrink:0}}>
-              <div style={{width:12,height:12,borderRadius:6,background:"#F0F4F8",position:"absolute",top:2,left:showNS?14:2,transition:"left .2s"}}/>
+          <div onClick={function(){setShowNS(!showNS);}} style={{display:"flex",alignItems:"center",gap:8,padding:isMobile?"6px 14px":"5px 10px",fontSize:isMobile?13:10,color:showNS?"#F59E0B":"#4A5568",cursor:"pointer"}}>
+            <div style={{width:isMobile?36:28,height:isMobile?22:16,borderRadius:isMobile?11:8,background:showNS?"#F59E0B":"#2A3545",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{width:isMobile?18:12,height:isMobile?18:12,borderRadius:isMobile?9:6,background:"#F0F4F8",position:"absolute",top:2,left:showNS?(isMobile?16:14):2,transition:"left .2s"}}/>
             </div>
             New Shores*
           </div>
-          <div style={{flex:1,overflow:"auto",padding:"2px 6px 6px"}}>
+          <div style={{flex:1,overflow:"auto",padding:isMobile?"2px 8px 8px":"2px 6px 6px",WebkitOverflowScrolling:"touch"}}>
             {buildingEntries.map(function(entry){var key=entry[0],b=entry[1],cat=CATS[b.c];
-              return <div key={key} onMouseDown={function(e){if(e.button===0)setGhost({type:key,x:e.clientX,y:e.clientY});}} onClick={function(){addRandom(key);}}
-                style={{width:"100%",display:"flex",alignItems:"center",gap:5,padding:"5px 6px",marginBottom:1,borderRadius:4,background:"transparent",cursor:"grab",fontFamily:FN,color:"#C8D6E5",fontSize:10}}
-                onMouseEnter={function(e){e.currentTarget.style.background="#1A2236";}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
-                <span style={{fontSize:14,width:20,textAlign:"center",flexShrink:0}}>{b.i}</span>
+              return <div key={key} onMouseDown={function(e){if(e.button===0&&!isMobile)setGhost({type:key,x:e.clientX,y:e.clientY});}} onClick={function(){addRandom(key);}}
+                style={{width:"100%",display:"flex",alignItems:"center",gap:isMobile?10:5,padding:isMobile?"12px 10px":"5px 6px",marginBottom:isMobile?2:1,borderRadius:isMobile?8:4,background:"transparent",cursor:"pointer",fontFamily:FN,color:"#C8D6E5",fontSize:isMobile?14:10,minHeight:isMobile?48:0}}
+                onMouseEnter={function(e){if(!isMobile)e.currentTarget.style.background="#1A2236";}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
+                <span style={{fontSize:isMobile?22:14,width:isMobile?28:20,textAlign:"center",flexShrink:0}}>{b.i}</span>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:600,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.n}{b.ns?" *":""}</div>
-                  <div style={{fontSize:7,color:cat.color}}>{b.b>=0?"+":""}{b.b} | r{b.r} | {b.w+"x"+b.h}</div>
+                  <div style={{fontWeight:600,fontSize:isMobile?14:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.n}{b.ns?" *":""}</div>
+                  <div style={{fontSize:isMobile?10:7,color:cat.color}}>{b.b>=0?"+":""}{b.b} | r{b.r} | {b.w+"x"+b.h}</div>
                 </div>
-                <div style={{fontSize:7,color:"#4A5568"}}>s:{b.s>=0?"+":""}{b.s}</div>
+                <div style={{fontSize:isMobile?10:7,color:"#4A5568"}}>s:{b.s>=0?"+":""}{b.s}</div>
               </div>;
             })}
           </div>
@@ -521,34 +586,38 @@ export default function App() {
             <div style={{fontSize:8,color:"#4A5568",lineHeight:1.6}}>Industry (Brickyard-Mason-Warehouse), Farm (Fields-Mill-Brewery), City (Houses-Fountain), Temple district (Mason+Walls+Statues far from industry).</div>
           </div>
         </div>}
-      </div>
+      </div>}
 
       {/* MAIN */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"#0C1222",borderBottom:"1px solid #1A2236",zIndex:10,flexShrink:0}}>
-          <div style={{fontSize:12,fontWeight:800,letterSpacing:2,color:"#F0F4F8"}}>ISLANDERS<span style={{color:"#E59500"}}>{"\u2B21"}</span>PLANNER</div>
-          <div style={{width:1,height:16,background:"#1A2236"}}/>
-          <div style={{fontSize:18,fontWeight:800,color:total>=0?"#34D399":"#F87171"}}>{total>=0?"+":""}{total}</div>
-          <div style={{fontSize:9,color:"#4A5568"}}>{nodes.length} BLDGS</div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",minHeight:0}}>
+        {/* Toolbar */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?6:8,padding:isMobile?"8px 10px":"6px 12px",background:"#0C1222",borderBottom:"1px solid #1A2236",zIndex:10,flexShrink:0}}>
+          {isMobile&&<button onClick={function(){setPanelOpen(!panelOpen);}} style={{width:44,height:44,borderRadius:8,border:"1px solid #E59500",background:panelOpen?"#E5950033":"transparent",color:"#E59500",fontSize:18,cursor:"pointer",fontFamily:FN,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            {panelOpen?"\u2715":"\u2630"}
+          </button>}
+          {!isMobile&&<div style={{fontSize:12,fontWeight:800,letterSpacing:2,color:"#F0F4F8"}}>ISLANDERS<span style={{color:"#E59500"}}>{"\u2B21"}</span>PLANNER</div>}
+          {!isMobile&&<div style={{width:1,height:16,background:"#1A2236"}}/>}
+          <div style={{fontSize:isMobile?20:18,fontWeight:800,color:total>=0?"#34D399":"#F87171"}}>{total>=0?"+":""}{total}</div>
+          <div style={{fontSize:isMobile?11:9,color:"#4A5568"}}>{nodes.length}</div>
           <div style={{flex:1}}/>
-          <div onClick={function(){setRadiiOn(!radiiOn);}} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",padding:"3px 7px",borderRadius:4,background:"#141E30"}}>
+          {!isMobile&&<div onClick={function(){setRadiiOn(!radiiOn);}} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",padding:"3px 7px",borderRadius:4,background:"#141E30"}}>
             <span style={{fontSize:9,color:radiiOn?"#F0F4F8":"#4A5568",fontFamily:FN}}>RADII</span>
             <div style={{width:32,height:18,borderRadius:9,background:radiiOn?"#22C55E":"#2A3545",position:"relative",transition:"background .2s"}}>
               <div style={{width:14,height:14,borderRadius:7,background:"#F0F4F8",position:"absolute",top:2,left:radiiOn?16:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
             </div>
-          </div>
-          {selNode&&<div onClick={function(){setHidR(function(p){var n=Object.assign({},p);n[selId]=!n[selId];return n;});}} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",padding:"3px 7px",borderRadius:4,background:"#141E30"}}>
+          </div>}
+          {!isMobile&&selNode&&<div onClick={function(){setHidR(function(p){var n=Object.assign({},p);n[selId]=!n[selId];return n;});}} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",padding:"3px 7px",borderRadius:4,background:"#141E30"}}>
             <span style={{fontSize:9,color:!hidR[selId]?"#F0F4F8":"#4A5568",fontFamily:FN}}>THIS</span>
             <div style={{width:32,height:18,borderRadius:9,background:!hidR[selId]?"#3B82F6":"#2A3545",position:"relative",transition:"background .2s"}}>
               <div style={{width:14,height:14,borderRadius:7,background:"#F0F4F8",position:"absolute",top:2,left:!hidR[selId]?16:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
             </div>
           </div>}
-          {nodes.length>0&&<button onClick={function(){setNodes(function(p){if(!p.length)return p;var last=p[p.length-1];if(selId===last.id)setSelId(null);return p.slice(0,-1);});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #E5950044",background:"#E5950011",color:"#E59500",fontSize:9,cursor:"pointer",fontFamily:FN}}>UNDO</button>}
-          <button onClick={function(){setNodes([]);setSelId(null);setPan({x:0,y:0});setZoom(1);setHidR({});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #1A2236",background:"transparent",color:"#4A5568",fontSize:9,cursor:"pointer",fontFamily:FN}}>CLEAR</button>
-          <div style={{display:"flex",alignItems:"center",gap:2}}>
-            <button onClick={function(){zoomCentered(0.8);}} style={{width:22,height:22,borderRadius:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>-</button>
-            <span style={{fontSize:8,color:"#4A5568",minWidth:32,textAlign:"center",fontFamily:FN}}>{Math.round(zoom*100)}%</span>
-            <button onClick={function(){zoomCentered(1.25);}} style={{width:22,height:22,borderRadius:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          {nodes.length>0&&<button onClick={function(){setNodes(function(p){if(!p.length)return p;var last=p[p.length-1];if(selId===last.id)setSelId(null);return p.slice(0,-1);});}} style={{padding:isMobile?"10px 14px":"3px 7px",borderRadius:isMobile?8:3,border:"1px solid #E5950044",background:"#E5950011",color:"#E59500",fontSize:isMobile?13:9,cursor:"pointer",fontFamily:FN,minHeight:isMobile?44:0}}>UNDO</button>}
+          {!isMobile&&<button onClick={function(){setNodes([]);setSelId(null);setPan({x:0,y:0});setZoom(1);setHidR({});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #1A2236",background:"transparent",color:"#4A5568",fontSize:9,cursor:"pointer",fontFamily:FN}}>CLEAR</button>}
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?4:2}}>
+            <button onClick={function(){zoomCentered(0.8);}} style={{width:isMobile?40:22,height:isMobile?40:22,borderRadius:isMobile?8:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:isMobile?18:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>-</button>
+            <span style={{fontSize:isMobile?11:8,color:"#4A5568",minWidth:isMobile?40:32,textAlign:"center",fontFamily:FN}}>{Math.round(zoom*100)}%</span>
+            <button onClick={function(){zoomCentered(1.25);}} style={{width:isMobile?40:22,height:isMobile?40:22,borderRadius:isMobile?8:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:isMobile?18:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
           </div>
         </div>
 
@@ -596,14 +665,17 @@ export default function App() {
 
           {ghost&&BD[ghost.type]&&<div style={{position:"fixed",left:ghost.x-16,top:ghost.y-16,fontSize:28,pointerEvents:"none",zIndex:1000,opacity:.8}}>{BD[ghost.type].i}</div>}
 
-          {nodes.length===0&&<div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none"}}>
-            <div style={{fontSize:48,marginBottom:8,opacity:.15}}>{"\u2B21"}</div>
-            <div style={{fontSize:12,fontWeight:700,letterSpacing:3,color:"#2A3A52",marginBottom:5}}>DRAG OR CLICK TO START</div>
-            <div style={{fontSize:8,letterSpacing:1,color:"#1A2236"}}>DRAG FROM SIDEBAR | SCROLL ZOOM | DEL REMOVE | BOONS TAB</div>
+          {nodes.length===0&&<div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",padding:isMobile?20:0}}>
+            <div style={{fontSize:isMobile?64:48,marginBottom:isMobile?12:8,opacity:.15}}>{"\u2B21"}</div>
+            <div style={{fontSize:isMobile?16:12,fontWeight:700,letterSpacing:isMobile?2:3,color:"#2A3A52",marginBottom:isMobile?8:5}}>{isMobile?"TAP + TO ADD BUILDINGS":"DRAG OR CLICK TO START"}</div>
+            <div style={{fontSize:isMobile?11:8,letterSpacing:1,color:"#1A2236",lineHeight:1.6}}>{isMobile?"PINCH TO ZOOM \u00B7 DRAG TO PAN \u00B7 TAP NODE TO SELECT":"DRAG FROM SIDEBAR | SCROLL ZOOM | CTRL+Z UNDO"}</div>
           </div>}
         </div>
 
-        {nodes.length>0&&<div style={{display:"flex",gap:4,padding:"4px 12px",background:"#0C1222",borderTop:"1px solid #1A2236",overflow:"auto",fontSize:8,flexShrink:0}}>
+        {/* Mobile FAB - bottom left + button to open building panel */}
+        {isMobile&&!panelOpen&&<button onClick={function(){setPanelOpen(true);setTab("buildings");}} style={{position:"absolute",bottom:20,left:20,width:56,height:56,borderRadius:16,border:"none",background:"#E59500",color:"#0C1222",fontSize:28,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 16px rgba(229,149,0,.4)",zIndex:20}}>+</button>}
+
+        {nodes.length>0&&!isMobile&&<div style={{display:"flex",gap:4,padding:"4px 12px",background:"#0C1222",borderTop:"1px solid #1A2236",overflow:"auto",fontSize:8,flexShrink:0}}>
           {Object.entries(CATS).map(function(e){var k=e[0],c=e[1],cn=nodes.filter(function(n){return BD[n.type]&&BD[n.type].c===k;});if(!cn.length)return null;var cs=cn.reduce(function(a,n){return a+(scores[n.id]?scores[n.id].score:0);},0);
             return <div key={k} style={{display:"flex",alignItems:"center",gap:3,padding:"3px 8px",borderRadius:4,background:c.color+"0A",whiteSpace:"nowrap"}}>
               <span style={{color:c.color,fontWeight:600,fontSize:10}}>{c.label}</span><span style={{color:"#4A5568",fontSize:9}}>x{cn.length}</span>
