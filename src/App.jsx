@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { Analytics } from '@vercel/analytics/react';
 
 /* ═══ DATA ═══ */
 var CATS = {
@@ -684,6 +685,7 @@ export default function App() {
           })}
         </div>}
       </div>
+      <Analytics />
     </div>
   );
 }
