@@ -152,7 +152,7 @@ var PACKS = [
 var IND_TYPES = { lumberjack:1,sawmill:1,brickyard:1,sandpit:1,mason:1,goldmine:1,warehouse:1,mill:1,seaweedfarm:1 };
 var TC = { early:"#22C55E", mid:"#3B82F6", late:"#A855F7" };
 var FN = "'JetBrains Mono', monospace";
-var U = 14; // base pixel unit
+var U = 20; // base pixel unit
 
 function gd(a, b) { return Math.sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)); }
 function gb(id) { if (!id) return null; for (var i=0;i<BOONS.length;i++) if (BOONS[i].id===id) return BOONS[i]; return null; }
@@ -160,6 +160,7 @@ function gr(nd) { var d=BD[nd.type]; if(!d) return 50; var bn=gb(nd.boon); retur
 function gpx(d) { return { pw: d.w * U, ph: d.h * U }; }
 
 /* ═══ SCORE ENGINE ═══ */
+// Placement order matters: a building only scores from buildings placed BEFORE it
 function calcScores(nodes) {
   var R = {};
   for (var ni=0; ni<nodes.length; ni++) {
@@ -167,8 +168,9 @@ function calcScores(nodes) {
     if (!def) continue;
     var boon=gb(nd.boon), effR=gr(nd);
     var unit=def.b, bd=[{src:"Base",val:def.b}];
-    for (var oi=0; oi<nodes.length; oi++) {
-      var o=nodes[oi]; if(o.id===nd.id) continue;
+    // Only check buildings placed before this one (lower index = placed earlier)
+    for (var oi=0; oi<ni; oi++) {
+      var o=nodes[oi]; 
       var od=BD[o.type]; if(!od) continue;
       var maxR=Math.max(effR, gr(o));
       if (gd(nd,o) > maxR) continue;
@@ -191,7 +193,7 @@ function calcScores(nodes) {
     var mult=1;
     if (boon&&boon.type==="mult") { var bonus=Math.round(unit*(boon.val-1)); mult=boon.val; bd.push({src:"Boon x"+boon.val,val:bonus}); }
     var fu=Math.round(unit*mult);
-    R[nd.id]={score:fu, unit:fu, bd:bd};
+    R[nd.id]={score:fu, unit:fu, bd:bd, order:ni+1};
   }
   return R;
 }
@@ -227,7 +229,7 @@ function BuildingShape(props) {
 
 function NodeGroup(props) {
   var nd=props.nd, def=props.def, cat=props.cat, isSel=props.isSel, isHov=props.isHov,
-      sc=props.sc, onMD=props.onMD, onEnter=props.onEnter, onLeave=props.onLeave;
+      sc=props.sc, order=props.order, onMD=props.onMD, onEnter=props.onEnter, onLeave=props.onLeave;
   var boon = gb(nd.boon);
   var strokeColor = isSel ? cat.color : boon ? boon.color+"88" : "#1E293B";
   var p = gpx(def);
@@ -262,19 +264,19 @@ function NodeGroup(props) {
         </g>
       )}
 
-      {/* Score badge */}
-      <g transform={"translate("+(halfW + 2)+","+(-p.ph/2 - 2)+")"}>
-        <rect x={-16} y={-8} width={32} height={16} rx={3}
-          fill={sc >= 0 ? "#052E16" : "#450A0A"}
-          stroke={sc >= 0 ? "#22C55E55" : "#EF444455"} strokeWidth={0.5} />
-        <text x={0} y={1} textAnchor="middle" dominantBaseline="central"
-          fill={sc >= 0 ? "#6EE7B7" : "#FCA5A5"} fontSize={8} fontWeight={700} fontFamily={FN}
-          style={{pointerEvents:"none"}}>{sc >= 0 ? "+" : ""}{sc}</text>
-      </g>
+      {/* Placement order */}
+      <text x={-halfW - 3} y={-p.ph/2 - 3} textAnchor="end" dominantBaseline="auto"
+        fill="#4A5568" fontSize={6} fontFamily={FN} fontWeight={600}
+        style={{pointerEvents:"none"}}>{"#"+order}</text>
+
+      {/* Score - minimal text, no background */}
+      <text x={halfW + 3} y={-p.ph/2 - 3} textAnchor="start" dominantBaseline="auto"
+        fill={sc >= 0 ? "#6EE7B7" : "#FCA5A5"} fontSize={7} fontWeight={700} fontFamily={FN}
+        style={{pointerEvents:"none"}}>{sc >= 0 ? "+" : ""}{sc}</text>
 
       {/* Name label */}
-      <text x={0} y={p.ph/2 + 11} textAnchor="middle"
-        fill="#4A5568" fontSize={7} fontFamily={FN} fontWeight={600}
+      <text x={0} y={p.ph/2 + 13} textAnchor="middle"
+        fill="#4A5568" fontSize={8} fontFamily={FN} fontWeight={600}
         style={{pointerEvents:"none"}}>{def.n}</text>
     </g>
   );
@@ -369,16 +371,54 @@ export default function App() {
   _e(function(){
     function h(e){
       if((e.key==="Delete"||e.key==="Backspace")&&selId){setNodes(function(p){return p.filter(function(n){return n.id!==selId;});});setSelId(null);}
+      if(e.key==="z"&&(e.ctrlKey||e.metaKey)&&!e.shiftKey){e.preventDefault();setNodes(function(p){if(!p.length)return p;return p.slice(0,-1);});setSelId(null);}
       if(e.key==="d"&&(e.ctrlKey||e.metaKey)&&selId){e.preventDefault();setNodes(function(p){var nd=p.find(function(n){return n.id===selId;});if(!nd)return p;var nid=idRef.current++;setTimeout(function(){setSelId(nid);},0);return p.concat([{id:nid,type:nd.type,x:nd.x+40,y:nd.y+40,boon:nd.boon}]);});}
     }
     window.addEventListener("keydown",h); return function(){window.removeEventListener("keydown",h);};
   },[selId]);
 
+  // Zoom centered on buildings centroid
+  function zoomCentered(factor) {
+    var newZoom = Math.max(0.15, Math.min(3, zoom * factor));
+    if (nodes.length === 0) { setZoom(newZoom); return; }
+    // Compute centroid of all buildings in canvas coords
+    var cx = 0, cy = 0;
+    for (var i = 0; i < nodes.length; i++) { cx += nodes[i].x; cy += nodes[i].y; }
+    cx /= nodes.length; cy /= nodes.length;
+    // Get viewport center in canvas coords at current zoom
+    var rect = cvRef.current ? cvRef.current.getBoundingClientRect() : { width: 800, height: 600 };
+    var vpCx = rect.width / 2;
+    var vpCy = rect.height / 2;
+    // New pan so centroid maps to viewport center at new zoom
+    var newPanX = vpCx / newZoom - cx;
+    var newPanY = vpCy / newZoom - cy;
+    setZoom(newZoom);
+    setPan({ x: newPanX, y: newPanY });
+  }
+
   _e(function(){
     var el=cvRef.current; if(!el) return;
-    function h(e){e.preventDefault();setZoom(function(p){return Math.max(.15,Math.min(3,p*(e.deltaY>0?.92:1.08)));});}
+    function h(e){
+      e.preventDefault();
+      var factor = e.deltaY > 0 ? 0.92 : 1.08;
+      // If nodes exist, zoom toward centroid; otherwise just zoom
+      if (nodes.length === 0) {
+        setZoom(function(p){return Math.max(.15,Math.min(3,p*factor));});
+        return;
+      }
+      var cx=0,cy=0;
+      for(var i=0;i<nodes.length;i++){cx+=nodes[i].x;cy+=nodes[i].y;}
+      cx/=nodes.length;cy/=nodes.length;
+      var rect=el.getBoundingClientRect();
+      var vpCx=rect.width/2, vpCy=rect.height/2;
+      setZoom(function(oldZ){
+        var nz=Math.max(.15,Math.min(3,oldZ*factor));
+        setPan({x:vpCx/nz-cx, y:vpCy/nz-cy});
+        return nz;
+      });
+    }
     el.addEventListener("wheel",h,{passive:false}); return function(){el.removeEventListener("wheel",h);};
-  },[]);
+  },[nodes]);
 
   function onCvDown(e) {
     if(e.target.closest("[data-nodeid]")) return;
@@ -402,14 +442,15 @@ export default function App() {
 
   var lines = _m(function(){
     var res=[];
-    for(var i=0;i<nodes.length;i++) for(var j=i+1;j<nodes.length;j++){
-      var a=nodes[i],b=nodes[j],da=BD[a.type],db=BD[b.type];
-      if(!da||!db) continue;
-      if(gd(a,b) > Math.max(gr(a),gr(b))) continue;
+    for(var i=0;i<nodes.length;i++) for(var j=0;j<i;j++){
+      // i was placed AFTER j. Show what i gets from j.
+      var later=nodes[i],earlier=nodes[j],dl=BD[later.type],de=BD[earlier.type];
+      if(!dl||!de) continue;
+      if(gd(later,earlier) > Math.max(gr(later),gr(earlier))) continue;
       var t=0;
-      if(a.type===b.type){t=da.s+db.s;}
-      else{t=(((ADJ[a.type]&&ADJ[a.type][b.type])||0)+((PEN[a.type]&&PEN[a.type][b.type])||0))+(((ADJ[b.type]&&ADJ[b.type][a.type])||0)+((PEN[b.type]&&PEN[b.type][a.type])||0));}
-      if(t!==0) res.push({a:a,b:b,t:t});
+      if(later.type===earlier.type){t=dl.s;}
+      else{t=((ADJ[later.type]&&ADJ[later.type][earlier.type])||0)+((PEN[later.type]&&PEN[later.type][earlier.type])||0);}
+      if(t!==0) res.push({a:earlier,b:later,t:t});
     }
     return res;
   },[nodes]);
@@ -502,9 +543,13 @@ export default function App() {
               <div style={{width:14,height:14,borderRadius:7,background:"#F0F4F8",position:"absolute",top:2,left:!hidR[selId]?16:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
             </div>
           </div>}
-          {selNode&&<button onClick={function(){setNodes(function(p){return p.filter(function(n){return n.id!==selId;});});setSelId(null);}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #7F1D1D",background:"#7F1D1D33",color:"#FCA5A5",fontSize:8,cursor:"pointer",fontFamily:FN}}>DEL</button>}
-          <button onClick={function(){setNodes([]);setSelId(null);setPan({x:0,y:0});setZoom(1);setHidR({});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #1A2236",background:"transparent",color:"#4A5568",fontSize:8,cursor:"pointer",fontFamily:FN}}>CLEAR</button>
-          <span style={{fontSize:7,color:"#2A3545"}}>{Math.round(zoom*100)}%</span>
+          {nodes.length>0&&<button onClick={function(){setNodes(function(p){if(!p.length)return p;var last=p[p.length-1];if(selId===last.id)setSelId(null);return p.slice(0,-1);});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #E5950044",background:"#E5950011",color:"#E59500",fontSize:9,cursor:"pointer",fontFamily:FN}}>UNDO</button>}
+          <button onClick={function(){setNodes([]);setSelId(null);setPan({x:0,y:0});setZoom(1);setHidR({});}} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #1A2236",background:"transparent",color:"#4A5568",fontSize:9,cursor:"pointer",fontFamily:FN}}>CLEAR</button>
+          <div style={{display:"flex",alignItems:"center",gap:2}}>
+            <button onClick={function(){zoomCentered(0.8);}} style={{width:22,height:22,borderRadius:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>-</button>
+            <span style={{fontSize:8,color:"#4A5568",minWidth:32,textAlign:"center",fontFamily:FN}}>{Math.round(zoom*100)}%</span>
+            <button onClick={function(){zoomCentered(1.25);}} style={{width:22,height:22,borderRadius:3,border:"1px solid #1A2236",background:"#141E30",color:"#94A3B8",fontSize:13,cursor:"pointer",fontFamily:FN,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          </div>
         </div>
 
         <div ref={cvRef} style={{flex:1,position:"relative",overflow:"hidden"}} onMouseDown={onCvDown}>
@@ -537,11 +582,11 @@ export default function App() {
               </g>;})}
 
               {/* Nodes */}
-              {nodes.map(function(nd){
+              {nodes.map(function(nd,idx){
                 var def=BD[nd.type]; if(!def) return null;
                 var cat=CATS[def.c], sc=scores[nd.id]?scores[nd.id].score:0;
                 return <NodeGroup key={nd.id} nd={nd} def={def} cat={cat}
-                  isSel={selId===nd.id} isHov={hovId===nd.id} sc={sc}
+                  isSel={selId===nd.id} isHov={hovId===nd.id} sc={sc} order={idx+1}
                   onMD={onNodeDown} onEnter={setHovId} onLeave={function(){setHovId(null);}}/>;
               })}
             </g>
