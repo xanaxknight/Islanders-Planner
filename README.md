@@ -27,25 +27,3 @@ Building stats (base scores, self-penalties, adjacency bonuses/penalties) are so
 Radius values use relative multipliers from the Strategy Bible (1x, 4x, 10x, 20x of footprint) mapped to a consistent visual scale. New Shores buildings have approximate stats based on community gameplay observations.
 
 **Contributions welcome!** If you have exact datamined values, please open an issue or PR.
-
-## Quick Start
-
-### Standalone HTML (no build needed)
-Open `dist/index.html` in any browser. That's it.
-
-### Development
-```bash
-npm install
-npm run dev
-```
-
-### Build for production
-```bash
-npm run build
-```
-
-Output goes to `dist/` — deploy anywhere static files are served.
-
-## License
-
-MIT — This is a fan-made tool. ISLANDERS is a trademark of The Station / Coatsink / Thunderful.
